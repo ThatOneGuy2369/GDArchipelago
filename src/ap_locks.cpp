@@ -31,7 +31,7 @@ const std::map<std::string, Theme>& themes() {
 struct Painter {
     CCDrawNode* d;
     void poly(float cx, float cy, float s, std::vector<CCPoint> pts, ccColor4F fill) {
-        for (auto& p : pts) p = {cx + p.x * s / 2, cy + p.y * s / 2};
+        for (auto& p : pts) p = CCPoint(cx + p.x * s / 2, cy + p.y * s / 2);
         d->drawPolygon(pts.data(), static_cast<unsigned int>(pts.size()), fill, 0.f, fill);
     }
     void tri(CCPoint a, CCPoint b, CCPoint c, ccColor4F fill) {
