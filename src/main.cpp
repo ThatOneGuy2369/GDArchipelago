@@ -443,3 +443,106 @@ class $modify(APMenuLayer, MenuLayer) {
 
     void onArchipelago(CCObject*) { apmod::openMenu(); }
 };
+
+// ------------------------------------------------------------------ lock icons on the menus
+#include <Geode/modify/GauntletSelectLayer.hpp>
+#include <Geode/modify/LevelInfoLayer.hpp>
+#include <Geode/modify/LevelPage.hpp>
+
+#include "ap_locks.hpp"
+
+static bool locksOn() { return session().hasConfig && Mod::get()->getSettingValue<bool>("lock-levels"); }
+
+static std::string lockReasonFor(GJGameLevel* level) {
+    int idx = seedLevelIdx(level);
+    return idx < 0 ? std::string() : session().playBlock(idx);
+}
+
+static bool refuseLocked(GJGameLevel* level) {
+    if (!locksOn()) return false;
+    auto why = lockReasonFor(level);
+    if (why.empty()) return false;
+    Notification::create("Locked by Archipelago: " + why, NotificationIcon::Error, 3.f)->show();
+    return true;
+}
+
+// Official levels: a gold padlock on the level box; pressing it says what's missing instead of loading.
+class $modify(APLevelPage, LevelPage) {
+    void updateDynamicPage(GJGameLevel* level) {
+        LevelPage::updateDynamicPage(level);
+        if (!m_levelDisplay) return;
+        if (auto* old = m_levelDisplay->getChildByID("ap-lock"_spr)) old->removeFromParent();
+        if (!locksOn() || lockReasonFor(level).empty()) return;
+        auto* lock = aplocks::makeLock("level", 44.f);
+        lock->setID("ap-lock"_spr);
+        auto size = m_levelDisplay->getContentSize();
+        lock->setPosition({size.width - 34.f, size.height / 2});
+        m_levelDisplay->addChild(lock, 50);
+    }
+
+    void onPlay(CCObject* sender) {
+        if (refuseLocked(m_level)) return;
+        LevelPage::onPlay(sender);
+    }
+};
+
+// Online levels in the seed (the demons): a padlock over the play button.
+class $modify(APLevelInfoLayer, LevelInfoLayer) {
+    bool init(GJGameLevel* level, bool challenge) {
+        if (!LevelInfoLayer::init(level, challenge)) return false;
+        if (locksOn() && !lockReasonFor(level).empty()) {
+            auto* lock = aplocks::makeLock("level", 46.f);
+            lock->setID("ap-lock"_spr);
+            if (auto* play = this->getChildByIDRecursive("play-button")) {
+                auto size = play->getContentSize();
+                lock->setPosition({size.width / 2, size.height / 2});
+                play->addChild(lock, 50);
+            } else {
+                auto win = CCDirector::get()->getWinSize();
+                lock->setPosition({win.width / 2, win.height / 2 + 50.f});
+                this->addChild(lock, 50);
+            }
+        }
+        return true;
+    }
+
+    void onPlay(CCObject* sender) {
+        if (refuseLocked(m_level)) return;
+        LevelInfoLayer::onPlay(sender);
+    }
+};
+
+// Gauntlet list: each locked gauntlet gets its own themed lock, finished ones a green check.
+static void decorateGauntlets(CCNode* node) {
+    if (!node) return;
+    if (auto* g = typeinfo_cast<GauntletNode*>(node)) {
+        int type = g->m_gauntlet ? g->m_gauntlet->m_packID : 0;
+        std::string name = gauntletName(type);
+        int gIdx = name.empty() ? -1 : session().gauntletIdx(name);
+        if (auto* old = g->getChildByID("ap-lock"_spr)) old->removeFromParent();
+        if (gIdx < 0) return;
+        auto size = g->getContentSize();
+        CCNode* icon = nullptr;
+        if (session().state.completed.count(gIdx)) {
+            icon = aplocks::makeCheck(30.f);
+            icon->setPosition({size.width / 2 + 30.f, size.height / 2 + 60.f});
+        } else if (locksOn() && !session().gauntletBlock(gIdx).empty()) {
+            icon = aplocks::makeLock(aplocks::themeForGauntlet(name), 60.f);
+            icon->setPosition({size.width / 2, size.height / 2});
+        }
+        if (icon) {
+            icon->setID("ap-lock"_spr);
+            g->addChild(icon, 100);
+        }
+        return;
+    }
+    if (auto* children = node->getChildren())
+        for (unsigned int i = 0; i < children->count(); ++i) decorateGauntlets(static_cast<CCNode*>(children->objectAtIndex(i)));
+}
+
+class $modify(APGauntletSelectLayer, GauntletSelectLayer) {
+    void setupGauntlets() {
+        GauntletSelectLayer::setupGauntlets();
+        if (session().hasConfig) decorateGauntlets(this);
+    }
+};
