@@ -33,6 +33,7 @@ namespace {
 apgd::Session g_session;
 WsClient g_ws;
 std::string g_lastError;
+int g_connections = 0;            // bumped on every new socket, so saved coins are synced once per connection
 
 // Geode v6: save paths are asp::fs::Path; read/write through Geode's file utils (no std::filesystem).
 std::string stateFileName(const std::string& key) {
@@ -71,6 +72,7 @@ void setupOnce() {
         geode::queueInMainThread([url] {
             log::info("Socket open: {}", url);
             g_lastError.clear();
+            ++g_connections;
             g_session.onSocketOpen();
             refreshMenu();
         });
@@ -125,7 +127,40 @@ void disconnect() {
     refreshMenu();
 }
 
+// Coins the game has saved for a level (1..count). Main levels use secret coins, online levels user coins.
+std::set<int> savedCoins(GJGameLevel* level, int count) {
+    std::set<int> out;
+    auto* gsm = GameStatsManager::sharedState();
+    if (!level || !gsm) return out;
+    bool official = static_cast<int>(level->m_levelType) == 1;
+    for (int n = 1; n <= count && n <= 3; ++n) {
+        const char* key = level->getCoinKey(n);
+        if (!key) continue;
+        bool have = official ? gsm->hasSecretCoin(key) : (gsm->hasUserCoin(key) || gsm->hasPendingUserCoin(key));
+        if (have) out.insert(n);
+    }
+    return out;
+}
+
+// Once per connection: coins already in your save for official levels you've beaten count too
+// (so a coin collected before, or one the pickup hook missed, isn't lost).
+void syncSavedCoins() {
+    static int syncedFor = -1;
+    if (!g_session.connected || !g_session.hasConfig || !g_session.cfg.includeCoins) return;
+    if (syncedFor == g_connections) return;
+    syncedFor = g_connections;
+    int counted = 0;
+    for (auto& lv : g_session.cfg.levels) {
+        if (lv.tier != "main" || lv.kind != "level" || lv.coinIds.empty() || !g_session.state.completed.count(lv.idx)) continue;
+        auto* level = GameLevelManager::sharedState()->getMainLevel(lv.idx, true);
+        for (int n : savedCoins(level, static_cast<int>(lv.coinIds.size())))
+            if (g_session.reportCoin(lv.idx, n)) ++counted;
+    }
+    if (counted) log::info("Archipelago: counted {} coin(s) already in your save", counted);
+}
+
 void pump() {
+    syncSavedCoins();
     for (auto& msg : g_session.takeOutgoing()) {
         if (!g_ws.send(msg)) log::warn("Archipelago: not connected, message kept for the next connection");
     }
@@ -299,7 +334,11 @@ public:                                        // the coin and portal hooks belo
         bool counted = session().reportLevel(m_fields->idx, &why);
         if (counted || why == "already counted") {
             m_fields->completed = true;
-            for (int n : m_fields->coins) session().reportCoin(m_fields->idx, n);
+            // Coins picked up on this run, plus every coin the game has saved for this level.
+            auto coins = m_fields->coins;
+            if (auto* lv = session().cfg.level(m_fields->idx))
+                for (int n : apmod::savedCoins(m_level, static_cast<int>(lv->coinIds.size()))) coins.insert(n);
+            for (int n : coins) session().reportCoin(m_fields->idx, n);
         } else {
             Notification::create("Archipelago: did not count - " + why, NotificationIcon::Error, 4.f)->show();
         }
