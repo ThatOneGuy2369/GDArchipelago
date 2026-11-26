@@ -30,6 +30,8 @@ jobs:
     name: Package builds
     runs-on: ubuntu-latest
     needs: ["build"]
+    permissions:
+      contents: write          # to publish the "latest" release below
     steps:
       - uses: geode-sdk/build-geode-mod/combine@main
         id: build
@@ -38,6 +40,17 @@ jobs:
         with:
           name: Build Output
           path: ${{ steps.build.outputs.build-output }}
+
+      # A public download link (Releases > "Latest build") that works without signing in.
+      - name: Publish the latest build as a release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag -R "${{ github.repository }}" || true
+          gh release create latest ${{ steps.build.outputs.build-output }}/*.geode -R "${{ github.repository }}" \
+            --target "${{ github.sha }}" --title "Latest build" \
+            --notes "Built automatically from ${{ github.sha }}. Download the .geode file and run installer/install.bat."
 
   core-tests:
     # The Archipelago logic (src/core) is plain C++: test it on every push too.
