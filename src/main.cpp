@@ -275,15 +275,9 @@ static bool isCoin(EffectGameObject* obj) {
 }
 
 class $modify(APGameLayer, GJBaseGameLayer) {
-    // Both are hooked: whichever the game uses for coins, the coin number set de-duplicates.
+    // (collectedObject is inlined in GD 2.2091 and can't be hooked; pickupItem handles coins.)
     void pickupItem(EffectGameObject* object) {
         GJBaseGameLayer::pickupItem(object);
-        auto* pl = PlayLayer::get();
-        if (pl && static_cast<GJBaseGameLayer*>(pl) == this && isCoin(object)) static_cast<APPlayLayer*>(pl)->apCoin(object);
-    }
-
-    void collectedObject(EffectGameObject* object) {
-        GJBaseGameLayer::collectedObject(object);
         auto* pl = PlayLayer::get();
         if (pl && static_cast<GJBaseGameLayer*>(pl) == this && isCoin(object)) static_cast<APPlayLayer*>(pl)->apCoin(object);
     }
