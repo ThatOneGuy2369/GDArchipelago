@@ -1,0 +1,52 @@
+# Builds the .geode file on GitHub's servers: push this folder to a GitHub repo, then open
+# Actions > Build Geode Mod > the latest run > Artifacts to download it. No local tools needed.
+name: Build Geode Mod
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Windows
+            os: windows-latest
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the mod
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          combine: true
+          target: ${{ matrix.config.target }}
+
+  package:
+    name: Package builds
+    runs-on: ubuntu-latest
+    needs: ["build"]
+    steps:
+      - uses: geode-sdk/build-geode-mod/combine@main
+        id: build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Build Output
+          path: ${{ steps.build.outputs.build-output }}
+
+  core-tests:
+    # The Archipelago logic (src/core) is plain C++: test it on every push too.
+    name: Core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run
+        run: |
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -DFIXTURES="\"$PWD/tests/fixtures.json\"" \
+              tests/test_core.cpp src/core/json.cpp src/core/ap_core.cpp -o core_tests
+          ./core_tests

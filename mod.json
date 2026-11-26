@@ -1,0 +1,49 @@
+{
+	"geode": "6.0.0",
+	"gd": {
+		"win": "2.2091"
+	},
+	"id": "gdap.archipelago",
+	"name": "Geometry Dash Archipelago",
+	"version": "v1.0.0",
+	"developer": "GDArchipelago",
+	"description": "Play Geometry Dash in an Archipelago multiworld: levels and coins send checks automatically, locked levels and gamemodes are enforced, items and traps arrive in game.",
+	"tags": ["gameplay", "online", "utility"],
+	"settings": {
+		"server": {
+			"name": "Server",
+			"description": "The room address from archipelago.gg, like archipelago.gg:53092. The port changes when a sleeping room restarts.",
+			"type": "string",
+			"default": "archipelago.gg:38281"
+		},
+		"slot": {
+			"name": "Slot name",
+			"description": "Your player name from your GeometryDash.yaml.",
+			"type": "string",
+			"default": ""
+		},
+		"password": {
+			"name": "Room password",
+			"description": "Leave empty if the room has none.",
+			"type": "string",
+			"default": ""
+		},
+		"auto-connect": {
+			"name": "Connect when the game starts",
+			"type": "bool",
+			"default": true
+		},
+		"lock-levels": {
+			"name": "Lock levels you haven't unlocked",
+			"description": "Trying to play one shows what it needs and returns you to the menu.",
+			"type": "bool",
+			"default": true
+		},
+		"lock-gamemodes": {
+			"name": "Lock gamemodes you haven't unlocked",
+			"description": "Touching a portal for a gamemode you don't have kills you.",
+			"type": "bool",
+			"default": true
+		}
+	}
+}
