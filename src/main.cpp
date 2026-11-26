@@ -17,6 +17,7 @@
 #include <Geode/utils/file.hpp>
 
 #include <cctype>
+#include <cmath>
 #include <climits>
 #include <random>
 #include <set>
@@ -466,12 +467,56 @@ static bool refuseLocked(GJGameLevel* level) {
     return true;
 }
 
+// A small "Archipelago: Done / Open / Locked" line with one dot per coin check (gold = counted), plus the
+// coin requirement for coin-locked levels. Shown on level pages and on online seed levels.
+static CCNode* apStatusNode(int idx) {
+    auto& s = session();
+    const apgd::Level* lv = s.cfg.level(idx);
+    if (!lv) return nullptr;
+    bool done = s.state.completed.count(idx) > 0;
+    bool locked = !done && !s.playBlock(idx).empty();
+    std::string text = done ? "Archipelago: Done" : locked ? "Archipelago: Locked" : "Archipelago: Open";
+    if (!done && s.cfg.coinLocks && s.cfg.includeCoins && lv->gate > 0)
+        text += "  (" + std::to_string(s.coinsTotal()) + "/" + std::to_string(lv->gate) + " coins to unlock)";
+    auto* node = CCNode::create();
+    auto* label = CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
+    label->setScale(.32f);
+    label->setColor(done ? ccColor3B{120, 255, 120} : locked ? ccColor3B{255, 110, 110} : ccColor3B{255, 200, 90});
+    float dots = static_cast<float>(lv->coinIds.size());
+    float labelW = label->getScaledContentSize().width;
+    float total = labelW + (dots > 0 ? 8.f + dots * 12.f : 0.f);
+    label->setPosition({-total / 2 + labelW / 2, 0});
+    node->addChild(label);
+    if (dots > 0) {
+        auto* d = CCDrawNode::create();
+        for (size_t n = 1; n <= lv->coinIds.size(); ++n) {
+            bool have = s.state.coins.count(std::to_string(idx) + ":" + std::to_string(n)) > 0;
+            CCPoint c{-total / 2 + labelW + 8.f + 12.f * (n - 1) + 5.f, 0};
+            CCPoint ring[16];
+            for (int i = 0; i < 16; ++i) ring[i] = CCPoint(c.x + 4.5f * std::cos(i * 0.3926991f), c.y + 4.5f * std::sin(i * 0.3926991f));
+            d->drawPolygon(ring, 16, have ? ccColor4F{1.f, .82f, .2f, 1.f} : ccColor4F{0.f, 0.f, 0.f, .35f}, 1.f,
+                           have ? ccColor4F{1.f, .95f, .6f, 1.f} : ccColor4F{.8f, .8f, .8f, .8f});
+        }
+        node->addChild(d);
+    }
+    return node;
+}
+
 // Official levels: a gold padlock on the level box; pressing it says what's missing instead of loading.
 class $modify(APLevelPage, LevelPage) {
     void updateDynamicPage(GJGameLevel* level) {
         LevelPage::updateDynamicPage(level);
         if (!m_levelDisplay) return;
         if (auto* old = m_levelDisplay->getChildByID("ap-lock"_spr)) old->removeFromParent();
+        if (auto* old = m_levelDisplay->getChildByID("ap-status"_spr)) old->removeFromParent();
+        int idx = seedLevelIdx(level);
+        if (idx >= 0) {
+            if (auto* status = apStatusNode(idx)) {
+                status->setID("ap-status"_spr);
+                status->setPosition({m_levelDisplay->getContentSize().width / 2, 11.f});   // along the box's bottom edge
+                m_levelDisplay->addChild(status, 50);
+            }
+        }
         if (!locksOn() || lockReasonFor(level).empty()) return;
         auto* lock = aplocks::makeLock("level", 44.f);
         lock->setID("ap-lock"_spr);
@@ -490,6 +535,15 @@ class $modify(APLevelPage, LevelPage) {
 class $modify(APLevelInfoLayer, LevelInfoLayer) {
     bool init(GJGameLevel* level, bool challenge) {
         if (!LevelInfoLayer::init(level, challenge)) return false;
+        int idx = seedLevelIdx(level);
+        if (idx >= 0) {
+            if (auto* status = apStatusNode(idx)) {
+                auto win = CCDirector::get()->getWinSize();
+                status->setID("ap-status"_spr);
+                status->setPosition({win.width / 2, 22.f});
+                this->addChild(status, 50);
+            }
+        }
         if (locksOn() && !lockReasonFor(level).empty()) {
             auto* lock = aplocks::makeLock("level", 46.f);
             lock->setID("ap-lock"_spr);
