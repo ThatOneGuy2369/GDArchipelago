@@ -87,6 +87,14 @@ Json RunState::toJson() const {
         .set("items_seen", static_cast<int64_t>(itemsSeen))
         .set("no_practice", noPractice).set("mute", mute).set("random_level", randomLevel).set("hands_up", handsUp)
         .set("forced_level", forcedLevel).set("hands_up_level", handsUpLevel).set("blocked_level", blockedLevel);
+    Json beaten = Json::object(), sizes = Json::object();
+    for (auto& kv : gauntletBeaten) {
+        Json ids = Json::array();
+        for (auto id : kv.second) ids.push(id);
+        beaten.set(std::to_string(kv.first), ids);
+    }
+    for (auto& kv : gauntletSize) sizes.set(std::to_string(kv.first), kv.second);
+    j.set("gauntlet_beaten", beaten).set("gauntlet_size", sizes);
     return j;
 }
 
@@ -104,6 +112,16 @@ RunState RunState::fromJson(const Json& j) {
     s.forcedLevel = clampInt("forced_level", -1);
     s.handsUpLevel = clampInt("hands_up_level", -1);
     s.blockedLevel = clampInt("blocked_level", -1);
+    auto keyInt = [](const std::string& k) { try { return std::stoi(k); } catch (...) { return -1; } };
+    for (auto& kv : j["gauntlet_beaten"].members()) {
+        int g = keyInt(kv.first);
+        if (g < 0) continue;
+        for (auto& id : kv.second.items()) if (id.isNumber()) s.gauntletBeaten[g].insert(id.asInt());
+    }
+    for (auto& kv : j["gauntlet_size"].members()) {
+        int g = keyInt(kv.first);
+        if (g >= 0 && kv.second.isNumber()) s.gauntletSize[g] = static_cast<int>(kv.second.asInt());
+    }
     return s;
 }
 
@@ -300,6 +318,43 @@ bool Session::reportGauntlet(int idx, std::string* why) {
     const Level* lv = hasConfig ? cfg.level(idx) : nullptr;
     if (!lv || lv->kind != "gauntlet") { if (why) *why = "not a gauntlet"; return false; }
     return reportLevel(idx, why);
+}
+
+int Session::gauntletIdx(const std::string& shortName) const {
+    std::string want = lower(shortName + " Gauntlet");
+    for (auto& lv : cfg.levels)
+        if (lv.kind == "gauntlet" && lower(lv.name) == want) return lv.idx;
+    return -1;
+}
+
+std::string Session::gauntletBlock(int gIdx) const {
+    const Level* g = hasConfig ? cfg.level(gIdx) : nullptr;
+    if (!g || state.completed.count(gIdx)) return "";
+    return lockReason(*g);
+}
+
+int Session::gauntletOpened(int gIdx, const std::vector<int64_t>& ids) {
+    const Level* g = hasConfig ? cfg.level(gIdx) : nullptr;
+    if (!g || g->kind != "gauntlet" || ids.empty()) return -1;
+    state.gauntletSize[gIdx] = static_cast<int>(ids.size());
+    auto& beaten = state.gauntletBeaten[gIdx];
+    int n = 0;
+    for (auto id : ids) n += beaten.count(id) ? 1 : 0;
+    if (n == static_cast<int>(ids.size()) && !state.completed.count(gIdx) && lockReason(*g).empty())
+        reportLevel(gIdx);
+    save();
+    return n;
+}
+
+int Session::gauntletLevelBeaten(int gIdx, int64_t levelId, const std::vector<int64_t>& ids) {
+    const Level* g = hasConfig ? cfg.level(gIdx) : nullptr;
+    if (!g || g->kind != "gauntlet") return -1;
+    if (!state.completed.count(gIdx) && !lockReason(*g).empty()) return -1;     // locked: doesn't count
+    state.gauntletBeaten[gIdx].insert(levelId);
+    int n = gauntletOpened(gIdx, ids);
+    if (n >= 0 && !state.completed.count(gIdx))
+        notify(Notice::Kind::Info, g->name + ": " + std::to_string(n) + "/" + std::to_string(ids.size()) + " levels beaten");
+    return n;
 }
 
 bool Session::reportCoin(int idx, int n) {

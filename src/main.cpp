@@ -9,6 +9,7 @@
 // Only levels that are part of your seed are affected; anything else plays normally.
 #include <Geode/Geode.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/GauntletLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
@@ -144,6 +145,58 @@ void pump() {
 
 using apmod::session;
 
+// ------------------------------------------------------------------ gauntlets (tracked automatically)
+// While a gauntlet's screen is open, its levels belong to that gauntlet: they count toward it once it's
+// unlocked, they're locked while it isn't, and when all of them are beaten the gauntlet check is sent.
+static int g_gauntletIdx = -1;
+static std::vector<int64_t> g_gauntletLevels;
+
+static const char* gauntletName(int type) {
+    static const char* names[] = {"", "Fire", "Ice", "Poison", "Shadow", "Lava", "Bonus", "Chaos", "Demon", "Time", "Crystal"};
+    return type >= 1 && type <= 10 ? names[type] : "";
+}
+
+class $modify(APGauntletLayer, GauntletLayer) {
+    void setupGauntlet(CCArray* levels) {
+        GauntletLayer::setupGauntlet(levels);
+        g_gauntletLevels.clear();
+        g_gauntletIdx = session().hasConfig ? session().gauntletIdx(gauntletName(static_cast<int>(m_gauntletType))) : -1;
+        if (g_gauntletIdx < 0 || !levels) return;
+        for (unsigned int i = 0; i < levels->count(); ++i)
+            if (auto* lv = typeinfo_cast<GJGameLevel*>(levels->objectAtIndex(i))) g_gauntletLevels.push_back(lv->m_levelID.value());
+        auto block = session().gauntletBlock(g_gauntletIdx);
+        if (!block.empty() && Mod::get()->getSettingValue<bool>("lock-levels")) {
+            Notification::create("Locked by Archipelago: " + block, NotificationIcon::Error, 4.f)->show();
+        } else if (!session().state.completed.count(g_gauntletIdx)) {
+            int n = session().gauntletOpened(g_gauntletIdx, g_gauntletLevels);
+            if (!session().state.completed.count(g_gauntletIdx))
+                Notification::create(std::string(gauntletName(static_cast<int>(m_gauntletType))) + " Gauntlet: " + std::to_string(n) +
+                                     "/" + std::to_string(g_gauntletLevels.size()) + " beaten for Archipelago",
+                                     NotificationIcon::Info, 3.f)->show();
+        }
+        apmod::pump();
+    }
+
+    void onBack(CCObject* sender) {
+        g_gauntletIdx = -1;
+        g_gauntletLevels.clear();
+        GauntletLayer::onBack(sender);
+    }
+
+    void keyBackClicked() {
+        g_gauntletIdx = -1;
+        g_gauntletLevels.clear();
+        GauntletLayer::keyBackClicked();
+    }
+};
+
+static int gauntletOf(GJGameLevel* level) {
+    if (!level || g_gauntletIdx < 0) return -1;
+    int64_t id = level->m_levelID.value();
+    for (auto l : g_gauntletLevels) if (l == id) return g_gauntletIdx;
+    return -1;
+}
+
 // ------------------------------------------------------------------ which seed level is this?
 static int seedLevelIdx(GJGameLevel* level) {
     auto& s = session();
@@ -164,6 +217,7 @@ class $modify(APPlayLayer, PlayLayer) {
 public:                                        // the coin and portal hooks below call into this class
     struct Fields {
         int idx = -1;
+        int gauntlet = -1;                    // set when this level is played from a gauntlet in the seed
         bool started = false;
         bool completed = false;
         bool practice = false;
@@ -178,7 +232,19 @@ public:                                        // the coin and portal hooks belo
         if (m_fields->started) return;
         m_fields->started = true;
         m_fields->idx = seedLevelIdx(m_level);
-        if (m_fields->idx < 0) return;
+        if (m_fields->idx < 0) {
+            m_fields->gauntlet = gauntletOf(m_level);
+            if (m_fields->gauntlet >= 0 && Mod::get()->getSettingValue<bool>("lock-levels")) {
+                auto block = session().gauntletBlock(m_fields->gauntlet);
+                if (!block.empty()) {
+                    m_fields->leaving = true;
+                    Notification::create("Locked by Archipelago: " + block, NotificationIcon::Error, 5.f)->show();
+                    Ref<PlayLayer> self = this;
+                    geode::queueInMainThread([self] { self->onQuit(); });
+                }
+            }
+            return;
+        }
         auto block = Mod::get()->getSettingValue<bool>("lock-levels") ? session().playBlock(m_fields->idx) : std::string();
         if (!block.empty()) {
             m_fields->leaving = true;
@@ -218,7 +284,13 @@ public:                                        // the coin and portal hooks belo
 
     void levelComplete() {
         PlayLayer::levelComplete();
-        if (m_fields->idx < 0 || m_fields->leaving) return;
+        if (m_fields->leaving) return;
+        if (m_fields->gauntlet >= 0 && !m_fields->practice) {
+            session().gauntletLevelBeaten(m_fields->gauntlet, m_level->m_levelID.value(), g_gauntletLevels);
+            apmod::pump();
+            return;
+        }
+        if (m_fields->idx < 0) return;
         if (m_fields->practice) {
             Notification::create("Archipelago: practice runs don't count", NotificationIcon::Info, 3.f)->show();
             return;
@@ -255,8 +327,9 @@ public:                                        // the coin and portal hooks belo
 
     // Called by the gamemode hooks below. True = this portal is not allowed.
     bool apBlockMode(PlayerObject* player, const char* mode) {
-        if (m_fields->idx < 0 || m_fields->leaving || !Mod::get()->getSettingValue<bool>("lock-gamemodes")) return false;
-        if (session().modeAllowed(m_fields->idx, mode)) return false;
+        int level = m_fields->idx >= 0 ? m_fields->idx : m_fields->gauntlet;     // gauntlet levels use its gamemodes
+        if (level < 0 || m_fields->leaving || !Mod::get()->getSettingValue<bool>("lock-gamemodes")) return false;
+        if (session().modeAllowed(level, mode)) return false;
         if (!m_fields->warnedMode) {
             m_fields->warnedMode = true;
             Notification::create("Locked gamemode: you don't have " + apgd::modeLabel(mode) + " yet",

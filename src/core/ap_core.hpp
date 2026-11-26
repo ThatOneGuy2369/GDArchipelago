@@ -71,6 +71,8 @@ struct RunState {
     int forcedLevel = -1;               // Random Level Trap: must attempt this level next
     int handsUpLevel = -1;              // Hands Up Trap: level being attempted under the trap
     int blockedLevel = -1;              // Hands Up Trap: can't re-enter until another level is beaten
+    std::map<int, std::set<int64_t>> gauntletBeaten;   // gauntlet idx -> GD level IDs beaten while it was unlocked
+    std::map<int, int> gauntletSize;                    // gauntlet idx -> how many levels it has
 
     Json toJson() const;
     static RunState fromJson(const Json& j);
@@ -123,7 +125,16 @@ public:
     bool modeAllowed(int idx, const std::string& mode) const; // touching a gamemode portal
     bool reportLevel(int idx, std::string* why = nullptr);    // beat a level
     bool reportCoin(int idx, int n);                          // collected coin n (1-3) and finished
-    bool reportGauntlet(int idx, std::string* why = nullptr); // honor: finished every level of a gauntlet
+    bool reportGauntlet(int idx, std::string* why = nullptr); // manual backup: finished every level of a gauntlet
+
+    // --- gauntlets, tracked automatically -------------------------------------------------------
+    int gauntletIdx(const std::string& shortName) const;      // "Fire" -> idx of "Fire Gauntlet" (-1 if not in seed)
+    std::string gauntletBlock(int gIdx) const;                // "" = its levels may be played now
+    // A level of that gauntlet was beaten. Counts only while the gauntlet is unlocked; when every level
+    // is beaten the gauntlet check is sent. Returns how many of its levels are beaten (-1 = locked).
+    int gauntletLevelBeaten(int gIdx, int64_t gdLevelId, const std::vector<int64_t>& gauntletLevelIds);
+    // Opening the gauntlet: remembers its size and sends the check if all levels were already beaten.
+    int gauntletOpened(int gIdx, const std::vector<int64_t>& gauntletLevelIds);
 
     // --- display -------------------------------------------------------------------------------
     Held held() const { return Held::from(cfg, received); }

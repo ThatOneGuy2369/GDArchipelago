@@ -323,6 +323,48 @@ static void testFirstConnectFloodIsSummarised(const Json& sd) {
     CHECK_EQ(summary, 1);
 }
 
+static void testGauntletTracking(const Json& sd) {
+    Harness h;
+    h.connect(sd);
+    int fire = h.s.gauntletIdx("Fire");
+    if (fire < 0) return;                                           // seed without gauntlets
+    CHECK_EQ(h.s.gauntletIdx("fire"), fire);                       // case doesn't matter
+    CHECK_EQ(h.s.gauntletIdx("Magic"), -1);                        // not in the world
+    std::vector<int64_t> ids = {101, 102, 103, 104, 105};
+    h.items(0, {});
+    CHECK(!h.s.gauntletBlock(fire).empty());                        // nothing unlocked yet
+    CHECK_EQ(h.s.gauntletLevelBeaten(fire, 101, ids), -1);          // beaten while locked: doesn't count
+    CHECK(h.s.state.gauntletBeaten[fire].empty());
+    std::vector<int64_t> all;
+    for (auto& kv : h.s.cfg.items) if (kv.second.kind != "trap") all.push_back(kv.first);
+    h.items(0, all);
+    CHECK(h.s.gauntletBlock(fire).empty());
+    CHECK_EQ(h.s.gauntletOpened(fire, ids), 0);
+    CHECK_EQ(h.s.state.gauntletSize[fire], 5);
+    for (int i = 0; i < 4; ++i) CHECK_EQ(h.s.gauntletLevelBeaten(fire, ids[i], ids), i + 1);
+    CHECK_EQ(h.s.gauntletLevelBeaten(fire, ids[0], ids), 4);         // a replay doesn't double-count
+    CHECK(!h.s.state.completed.count(fire));
+    size_t before = h.checks().size();
+    CHECK_EQ(h.s.gauntletLevelBeaten(fire, ids[4], ids), 5);
+    CHECK(h.s.state.completed.count(fire) == 1);                    // check sent automatically
+    CHECK_EQ(h.checks().size(), before + 1);
+    CHECK_EQ(h.s.levelsDone(), 0);                                   // gauntlets don't count toward the goal
+    CHECK(h.s.gauntletBlock(fire).empty());
+    // progress survives a restart
+    auto back = RunState::fromJson(Json::parse(h.s.state.toJson().dump()));
+    CHECK_EQ(back.gauntletBeaten[fire].size(), (size_t)5);
+    CHECK_EQ(back.gauntletSize[fire], 5);
+    CHECK(RunState::fromJson(Json::parse(R"({"gauntlet_beaten":{"x":[1],"41":["bad",7]}})")).gauntletBeaten[41].count(7) == 1);
+    // levels beaten earlier (all already recorded) send the check when the gauntlet is opened once it's unlocked
+    Harness h2;
+    h2.connect(sd);
+    int ice = h2.s.gauntletIdx("Ice");
+    h2.s.state.gauntletBeaten[ice] = {1, 2, 3};
+    h2.items(0, all);
+    CHECK_EQ(h2.s.gauntletOpened(ice, {1, 2, 3}), 3);
+    CHECK(h2.s.state.completed.count(ice) == 1);
+}
+
 int main() {
     Json fx = loadFixtures();
     testJson();
@@ -332,6 +374,7 @@ int main() {
         testGoalAndGauntlet(f["slot_data"]);
     }
     testTraps(fx[0]["slot_data"]);
+    testGauntletTracking(fx[0]["slot_data"]);
     testFirstConnectFloodIsSummarised(fx[0]["slot_data"]);
     std::cout << g_pass << " checks passed, " << g_fail << " failed\n";
     return g_fail ? 1 : 0;

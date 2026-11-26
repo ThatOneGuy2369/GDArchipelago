@@ -98,7 +98,7 @@ public:
             label("Beat levels in the game: checks are sent automatically.", win.width / 2, top - 140.f, .28f);
             return;
         }
-        label("Gauntlets (press when you've beaten every level in it)", win.width / 2, top - 122.f, .25f, {200, 200, 255});
+        label("Gauntlets: tracked automatically. Buttons are a backup if one didn't register.", win.width / 2, top - 122.f, .25f, {200, 200, 255});
         for (size_t i = 0; i < gauntlets.size(); ++i) {
             auto* g = gauntlets[i];
             std::string shortName = g->name;
@@ -108,11 +108,14 @@ public:
             bool locked = !done && !s.lockReason(*g).empty();
             float x = left + 50.f + static_cast<float>(i % 5) * 80.f;
             float y = top - 150.f - static_cast<float>(i / 5) * 34.f;
-            auto* b = button(done ? shortName + " OK" : shortName, menu_selector(APPanel::onGauntlet), x, y, .45f, g->idx,
+            auto beaten = s.state.gauntletBeaten.count(g->idx) ? s.state.gauntletBeaten.at(g->idx).size() : 0;
+            auto size = s.state.gauntletSize.count(g->idx) ? s.state.gauntletSize.at(g->idx) : 0;
+            std::string text = done ? shortName + " OK" : size ? shortName + " " + std::to_string(beaten) + "/" + std::to_string(size) : shortName;
+            auto* b = button(text, menu_selector(APPanel::onGauntlet), x, y, .45f, g->idx,
                              done ? "GJ_button_02.png" : locked ? "GJ_button_04.png" : "GJ_button_01.png");
             b->setEnabled(!done && !locked);
         }
-        label("Green = done, grey = locked (needs items), blue = report it", win.width / 2, top - 230.f, .22f, {180, 180, 180});
+        label("Green = done, grey = locked (needs items), blue = open: press only if it didn't count", win.width / 2, top - 230.f, .22f, {180, 180, 180});
     }
 
     void onConnect(CCObject*) { apmod::connect(); }

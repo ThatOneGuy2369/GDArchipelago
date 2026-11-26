@@ -27,7 +27,7 @@ change the `"win"` version in `mod.json` once Geode supports the new one, and bu
 1. Start Geometry Dash. Geode > Mods > **Geometry Dash Archipelago** > settings: set **Server** (like
    `archipelago.gg:53092`) and **Slot name**.
 2. Press the **AP** button on the main menu > **Connect**.
-3. Play. Checks, locks, items and traps are handled in game; gauntlets are reported from the AP panel.
+3. Play. Checks, locks, items and traps are handled in game; gauntlets are tracked automatically too.
 
 ## Testing the Archipelago logic
 `tests/run_tests.sh` builds and runs the core tests with any C++17 compiler (no Geode). They include
